@@ -13,6 +13,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     private var isRecording = false
     private var lastTimestamp = Date()
     private var anklePoints: [(time: TimeInterval, point: CGPoint)] = []
+    private var kicks: [(frame: Int, time: TimeInterval, speed: CGFloat)] = []
 
 
     // ✅ Buttons
@@ -33,9 +34,16 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         guard anklePoints.count > 6 else { return }
 
         let trimmedPoints = Array(anklePoints.dropFirst(5))
+        kicks.removeAll()  // Clear previous session kicks
 
-        var peakSpeed: CGFloat = 0
-        var peakFrameIndex = -1
+        var previousKickFrame = -10  // To avoid back-to-back detections
+        let minFrameGap = 5          // Minimum frame gap between kicks
+
+        let kickThreshold: CGFloat = 1000
+        let cooldownSpeed: CGFloat = 400
+
+        // Tracks whether we're allowed to detect a new kick
+        var inCooldown = false
 
         for i in 1..<trimmedPoints.count {
             let current = trimmedPoints[i]
@@ -52,28 +60,49 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 print("Frame \(i): speed = \(speed) px/sec")
             }
 
-            if speed > peakSpeed {
-                peakSpeed = speed
-                peakFrameIndex = i
+            if speed > kickThreshold && !inCooldown {
+                kicks.append((frame: i, time: current.time, speed: speed))
+                print("🚀 Kick detected at frame \(i) — speed = \(Int(speed)) px/sec")
+                DispatchQueue.main.async {
+                    self.showKickLabel(speed: speed)
+                }
+                inCooldown = true  // Start cooldown
+            }
+
+            if speed < cooldownSpeed {
+                inCooldown = false  // Reset cooldown if motion has settled
             }
         }
 
-        if peakSpeed > 150 {
-            print("🚀 Kick detected at Frame \(peakFrameIndex)! Peak Speed = \(Int(peakSpeed)) px/sec")
-            DispatchQueue.main.async {
-                self.showKickLabel(speed: peakSpeed)
-            }
-        } else {
-            print("❌ No kick detected (peak speed only \(Int(peakSpeed)) px/sec)")
+        print("✅ Total kicks: \(kicks.count)")
+        if let top = kicks.max(by: { $0.speed < $1.speed }) {
+            print("🏅 Peak kick: Frame \(top.frame), Speed = \(Int(top.speed)) px/sec")
         }
 
-        print("✅ Peak ankle speed = \(Int(peakSpeed)) px/sec")
+        DispatchQueue.main.async {
+            self.showKickCount()
+        }
+    }
+    
+    func showKickCount() {
+        let label = UILabel()
+        label.text = "Total Kicks: \(kicks.count)"
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        label.font = UIFont.boldSystemFont(ofSize: 16)
+        label.textAlignment = .center
+        label.frame = CGRect(x: 40, y: 150, width: 200, height: 40)
+        label.layer.cornerRadius = 10
+        label.layer.masksToBounds = true
+        view.addSubview(label)
+
+        UIView.animate(withDuration: 0.5, delay: 2.0, options: [], animations: {
+            label.alpha = 0
+        }, completion: { _ in
+            label.removeFromSuperview()
+        })
     }
 
-
-
-
-    
     private func setupOverlay() {
         shapeLayer.strokeColor = UIColor.green.cgColor
         shapeLayer.lineWidth = 2.0
