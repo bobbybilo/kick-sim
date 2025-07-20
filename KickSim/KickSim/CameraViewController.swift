@@ -2,49 +2,49 @@ import UIKit
 import AVFoundation
 import Vision
 
+// Main view controller handling camera input, Vision processing, and UI
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
 
-    var captureSession: AVCaptureSession?
-    var previewLayer: AVCaptureVideoPreviewLayer?
-    var shapeLayer = CAShapeLayer()
-    var bodyPoseRequest = VNDetectHumanBodyPoseRequest()
-    
+    // MARK: - Properties
 
-    private var isRecording = false
-    private var lastTimestamp = Date()
-    private var anklePoints: [(time: TimeInterval, point: CGPoint)] = []
-    private var kicks: [(frame: Int, time: TimeInterval, speed: CGFloat)] = []
+    var captureSession: AVCaptureSession?                     // Handles camera capture
+    var previewLayer: AVCaptureVideoPreviewLayer?            // Displays live camera feed
+    var shapeLayer = CAShapeLayer()                          // Used to draw stick figure overlay
+    var bodyPoseRequest = VNDetectHumanBodyPoseRequest()     // Vision request for body pose
 
+    private var isRecording = false                          // Whether app is currently recording motion
+    private var lastTimestamp = Date()                       // Tracks last frame time (for FPS)
+    private var anklePoints: [(time: TimeInterval, point: CGPoint)] = []  // Track right ankle points over time
+    private var kicks: [(frame: Int, time: TimeInterval, speed: CGFloat)] = [] // Detected kicks
 
-    // ✅ Buttons
+    // UI Buttons
     private let startButton = UIButton(type: .system)
     private let stopButton = UIButton(type: .system)
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupCamera()
-        setupOverlay()
-        setupButtons()   // ✅ Add buttons on screen
+        setupCamera()     // Initialize camera and start session
+        setupOverlay()    // Prepare the shape drawing layer
+        setupButtons()    // Add start and stop buttons to the UI
     }
-    
-    // 1️⃣ Add storage:
 
-    
+    // MARK: - Kick Detection Logic
+
     private func computeLegSpeed() {
         guard anklePoints.count > 6 else { return }
 
-        let trimmedPoints = Array(anklePoints.dropFirst(5))
-        kicks.removeAll()  // Clear previous session kicks
+        let trimmedPoints = Array(anklePoints.dropFirst(5))  // Skip early data points
+        kicks.removeAll()  // Clear previous kicks
 
-        var previousKickFrame = -10  // To avoid back-to-back detections
-        let minFrameGap = 5          // Minimum frame gap between kicks
+        var previousKickFrame = -10
+        let minFrameGap = 5
 
-        let kickThreshold: CGFloat = 1000
-        let cooldownSpeed: CGFloat = 400
+        let kickThreshold: CGFloat = 1000     // Minimum speed to count as a kick
+        let cooldownSpeed: CGFloat = 400      // Speed to exit cooldown
 
-        // Tracks whether we're allowed to detect a new kick
-        var inCooldown = false
+        var inCooldown = false                // Prevent rapid multiple detections
 
+        // Loop over ankle motion to compute speed and detect kicks
         for i in 1..<trimmedPoints.count {
             let current = trimmedPoints[i]
             let previous = trimmedPoints[i - 1]
@@ -60,30 +60,37 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 print("Frame \(i): speed = \(speed) px/sec")
             }
 
+            // Detect kick if speed exceeds threshold and we're not cooling down
             if speed > kickThreshold && !inCooldown {
                 kicks.append((frame: i, time: current.time, speed: speed))
                 print("🚀 Kick detected at frame \(i) — speed = \(Int(speed)) px/sec")
                 DispatchQueue.main.async {
                     self.showKickLabel(speed: speed)
                 }
-                inCooldown = true  // Start cooldown
+                inCooldown = true
             }
 
+            // Reset cooldown if motion has slowed
             if speed < cooldownSpeed {
-                inCooldown = false  // Reset cooldown if motion has settled
+                inCooldown = false
             }
         }
 
+        // Summary after all frames
         print("✅ Total kicks: \(kicks.count)")
         if let top = kicks.max(by: { $0.speed < $1.speed }) {
             print("🏅 Peak kick: Frame \(top.frame), Speed = \(Int(top.speed)) px/sec")
         }
 
+        // Show kick count on screen
         DispatchQueue.main.async {
             self.showKickCount()
         }
     }
-    
+
+    // MARK: - UI Display Functions
+
+    // Show total number of kicks
     func showKickCount() {
         let label = UILabel()
         label.text = "Total Kicks: \(kicks.count)"
@@ -96,6 +103,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         label.layer.masksToBounds = true
         view.addSubview(label)
 
+        // Fade out after 2 seconds
         UIView.animate(withDuration: 0.5, delay: 2.0, options: [], animations: {
             label.alpha = 0
         }, completion: { _ in
@@ -103,13 +111,15 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         })
     }
 
+    // Draw green stick figure overlay on camera feed
     private func setupOverlay() {
         shapeLayer.strokeColor = UIColor.green.cgColor
         shapeLayer.lineWidth = 2.0
         shapeLayer.fillColor = UIColor.clear.cgColor
         view.layer.addSublayer(shapeLayer)
     }
-    
+
+    // Show popup label for individual kick
     func showKickLabel(speed: CGFloat) {
         let label = UILabel()
         label.text = "Kick! \(Int(speed)) px/sec"
@@ -120,11 +130,10 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         label.frame = CGRect(x: 40, y: 100, width: 250, height: 40)
         label.layer.cornerRadius = 10
         label.layer.masksToBounds = true
-        label.alpha = 1
-        label.tag = 1234  // Tag so we can remove it later if needed
-
+        label.tag = 1234
         view.addSubview(label)
 
+        // Fade out label after 1 second
         UIView.animate(withDuration: 0.5, delay: 1.0, options: [], animations: {
             label.alpha = 0
         }, completion: { _ in
@@ -132,11 +141,13 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         })
     }
 
-    
+    // MARK: - Camera Setup
+
     private func setupCamera() {
         captureSession = AVCaptureSession()
         guard let session = captureSession else { return }
 
+        // Access back-facing wide-angle camera
         guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
               session.canAddInput(videoInput) else {
@@ -146,6 +157,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
         session.addInput(videoInput)
 
+        // Set camera to 60 FPS if supported
         do {
             try videoDevice.lockForConfiguration()
             for format in videoDevice.formats {
@@ -164,26 +176,27 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             print("Failed to set 60 FPS: \(error)")
         }
 
+        // Set up video output and delegate
         let videoOutput = AVCaptureVideoDataOutput()
         videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
         }
 
+        // Force portrait mode
         if let connection = videoOutput.connection(with: .video),
            connection.isVideoOrientationSupported {
             connection.videoOrientation = .portrait
         }
 
+        // Create and display preview layer
         previewLayer = AVCaptureVideoPreviewLayer(session: session)
         previewLayer?.videoGravity = .resizeAspectFill
         previewLayer?.frame = view.bounds
-
         if let connection = previewLayer?.connection,
            connection.isVideoOrientationSupported {
             connection.videoOrientation = .portrait
         }
-
         if let layer = previewLayer {
             view.layer.insertSublayer(layer, at: 0)
         }
@@ -191,27 +204,27 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         session.startRunning()
     }
 
-    /// ✅ Setup UI buttons for start/stop
+    // MARK: - Button Setup
+
     private func setupButtons() {
-        // Start button
+        // Start button styling
         startButton.setTitle("Start", for: .normal)
         startButton.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.7)
         startButton.setTitleColor(.white, for: .normal)
         startButton.layer.cornerRadius = 8
         startButton.addTarget(self, action: #selector(startRecordingTapped), for: .touchUpInside)
 
-        // Stop button
+        // Stop button styling
         stopButton.setTitle("Stop", for: .normal)
         stopButton.backgroundColor = UIColor.systemRed.withAlphaComponent(0.7)
         stopButton.setTitleColor(.white, for: .normal)
         stopButton.layer.cornerRadius = 8
         stopButton.addTarget(self, action: #selector(stopRecordingTapped), for: .touchUpInside)
 
-        // Place buttons on screen
         view.addSubview(startButton)
         view.addSubview(stopButton)
 
-        // Auto-layout (bottom left & right)
+        // Button placement
         startButton.translatesAutoresizingMaskIntoConstraints = false
         stopButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -228,7 +241,8 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         ])
     }
 
-    // ✅ Buttons call these
+    // MARK: - Recording Control
+
     @objc private func startRecordingTapped() {
         startRecording()
     }
@@ -238,11 +252,10 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     }
 
     func startRecording() {
-        anklePoints.removeAll() // 👈 very important
+        anklePoints.removeAll()
         isRecording = true
         print("▶️ Recording started")
     }
-
 
     func stopRecording() {
         isRecording = false
@@ -255,14 +268,15 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         isRecording ? stopRecording() : startRecording()
     }
 
+    // MARK: - Video Frame Processing
+
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
 
-        // ✅ Only run Vision & log FPS if recording
         guard isRecording else { return }
 
-        // ✅ FPS debug log — runs only if recording is true
+        // Debug: Print FPS
         let now = Date()
         let elapsed = now.timeIntervalSince(lastTimestamp)
         lastTimestamp = now
@@ -278,7 +292,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             if let observations = bodyPoseRequest.results as? [VNHumanBodyPoseObservation],
                let body = observations.first {
 
-                // ✅ NEW: extract right ankle position and store it
+                // Extract right ankle position
                 if let points = try? body.recognizedPoints(.all),
                    let ankle = points[.rightAnkle],
                    ankle.confidence > 0.5 {
@@ -292,7 +306,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     anklePoints.append((time: timestamp, point: point))
                 }
 
-                // ✅ Existing: update overlay
+                // Update overlay
                 DispatchQueue.main.async {
                     self.drawStickFigure(from: body)
                 }
@@ -302,11 +316,12 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         }
     }
 
-
+    // MARK: - Drawing the Stick Figure Overlay
 
     private func drawStickFigure(from body: VNHumanBodyPoseObservation) {
         guard let points = try? body.recognizedPoints(.all) else { return }
 
+        // Define joint connections for lines
         let joints: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
             (.neck, .root),
             (.root, .rightHip), (.root, .leftHip),
@@ -319,6 +334,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
         let path = UIBezierPath()
 
+        // Draw lines between joints
         for (jointA, jointB) in joints {
             guard let pointA = points[jointA], pointA.confidence > 0.2,
                   let pointB = points[jointB], pointB.confidence > 0.2 else { continue }
@@ -334,8 +350,10 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             path.addLine(to: cgPointB)
         }
 
+        // Remove old joint labels
         view.subviews.filter { $0.tag == 999 }.forEach { $0.removeFromSuperview() }
 
+        // Draw circles and labels at joints
         for (joint, point) in points {
             guard point.confidence > 0.2 else { continue }
 
