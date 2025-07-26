@@ -1,6 +1,7 @@
 import UIKit
 import AVFoundation
 import Vision
+import AudioToolbox
 
 // Main view controller handling camera input, Vision processing, and UI
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -17,6 +18,8 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     private var anklePoints: [(time: TimeInterval, point: CGPoint)] = []  // Track right ankle points over time
     private var kicks: [(frame: Int, time: TimeInterval, speed: CGFloat)] = [] // Detected kicks
     private var recordingStartTime: TimeInterval?
+    private var lastAnklePoint: (time: TimeInterval, point: CGPoint)?
+    private var lastKickTime: TimeInterval?
 
     // UI Buttons
     private let startButton = UIButton(type: .system)
@@ -68,9 +71,6 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             if speed > kickThreshold && !inCooldown {
                 kicks.append((frame: i, time: current.time, speed: speed))
                 print("🚀 Kick detected at frame \(i) — speed = \(Int(speed)) px/sec")
-                DispatchQueue.main.async {
-                    self.showKickLabel(speed: speed)
-                }
                 inCooldown = true
             }
 
@@ -309,6 +309,34 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                     )
                     let timestamp = Date().timeIntervalSince1970
                     anklePoints.append((time: timestamp, point: point))
+                    // Real-time kick detection
+                    if let last = lastAnklePoint {
+                        let dt = timestamp - last.time
+                        guard dt > 0.001 else { return }
+
+                        let dx = point.x - last.point.x
+                        let dy = point.y - last.point.y
+                        let distance = sqrt(dx * dx + dy * dy)
+                        let speed = distance / CGFloat(dt)
+
+                        let kickThreshold: CGFloat = 1000
+                        let cooldownSpeed: CGFloat = 400
+                        let cooldownTime: TimeInterval = 0.2
+
+                        let now = Date().timeIntervalSince1970
+                        let isInCooldown = (lastKickTime != nil) && (now - lastKickTime! < cooldownTime)
+
+                        if speed > kickThreshold && !isInCooldown {
+                            DispatchQueue.main.async {
+                                self.showKickLabel(speed: speed)
+                                AudioServicesPlaySystemSound(SystemSoundID(1057)) // 🔊 Beep now
+                            }
+                            lastKickTime = now
+                        }
+                    }
+
+                    lastAnklePoint = (time: timestamp, point: point)
+
                 }
 
                 // Update overlay
@@ -320,8 +348,13 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             print("Pose request failed: \(error)")
         }
     }
+    
+    func playBeep() {
+        AudioServicesPlaySystemSound(1057) // System sound ID for a "short" beep
+    }
 
     // MARK: - Drawing the Stick Figure Overlay
+    
 
     private func drawStickFigure(from body: VNHumanBodyPoseObservation) {
         guard let points = try? body.recognizedPoints(.all) else { return }
