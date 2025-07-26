@@ -321,7 +321,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
                         let kickThreshold: CGFloat = 1000
                         let cooldownSpeed: CGFloat = 400
-                        let cooldownTime: TimeInterval = 0.2
+                        let cooldownTime: TimeInterval = 2
 
                         let now = Date().timeIntervalSince1970
                         let isInCooldown = (lastKickTime != nil) && (now - lastKickTime! < cooldownTime)
