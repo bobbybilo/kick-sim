@@ -16,6 +16,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     private var lastTimestamp = Date()                       // Tracks last frame time (for FPS)
     private var anklePoints: [(time: TimeInterval, point: CGPoint)] = []  // Track right ankle points over time
     private var kicks: [(frame: Int, time: TimeInterval, speed: CGFloat)] = [] // Detected kicks
+    private var recordingStartTime: TimeInterval?
 
     // UI Buttons
     private let startButton = UIButton(type: .system)
@@ -47,6 +48,9 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         // Loop over ankle motion to compute speed and detect kicks
         for i in 1..<trimmedPoints.count {
             let current = trimmedPoints[i]
+            guard let startTime = recordingStartTime, current.time - startTime > 0.2 else {
+                continue  // Skip early data points within first 0.2 seconds
+            }
             let previous = trimmedPoints[i - 1]
             let dt = current.time - previous.time
             guard dt > 0.001 else { continue }
@@ -254,6 +258,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     func startRecording() {
         anklePoints.removeAll()
         isRecording = true
+        recordingStartTime = Date().timeIntervalSince1970
         print("▶️ Recording started")
     }
 
