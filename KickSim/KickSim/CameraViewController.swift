@@ -40,20 +40,18 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         let trimmedPoints = Array(anklePoints.dropFirst(5))  // Skip early data points
         kicks.removeAll()  // Clear previous kicks
 
-        var previousKickFrame = -10
-        let minFrameGap = 5
-
         let kickThreshold: CGFloat = 1000     // Minimum speed to count as a kick
         let cooldownSpeed: CGFloat = 400      // Speed to exit cooldown
 
-        var inCooldown = false                // Prevent rapid multiple detections
+        var isKicking = false
+        var currentKickFrames: [(frame: Int, time: TimeInterval, speed: CGFloat)] = []
 
-        // Loop over ankle motion to compute speed and detect kicks
         for i in 1..<trimmedPoints.count {
             let current = trimmedPoints[i]
             guard let startTime = recordingStartTime, current.time - startTime > 0.2 else {
                 continue  // Skip early data points within first 0.2 seconds
             }
+
             let previous = trimmedPoints[i - 1]
             let dt = current.time - previous.time
             guard dt > 0.001 else { continue }
@@ -67,17 +65,24 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                 print("Frame \(i): speed = \(speed) px/sec")
             }
 
-            // Detect kick if speed exceeds threshold and we're not cooling down
-            if speed > kickThreshold && !inCooldown {
-                kicks.append((frame: i, time: current.time, speed: speed))
-                print("🚀 Kick detected at frame \(i) — speed = \(Int(speed)) px/sec")
-                inCooldown = true
+            if speed > kickThreshold {
+                currentKickFrames.append((frame: i, time: current.time, speed: speed))
+                isKicking = true
+            } else if speed < cooldownSpeed && isKicking {
+                // Kick has ended — finalize it
+                if let max = currentKickFrames.max(by: { $0.speed < $1.speed }) {
+                    kicks.append(max)
+                    print("🚀 Kick finalized at frame \(max.frame) — peak speed = \(Int(max.speed)) px/sec")
+                }
+                currentKickFrames.removeAll()
+                isKicking = false
             }
+        }
 
-            // Reset cooldown if motion has slowed
-            if speed < cooldownSpeed {
-                inCooldown = false
-            }
+        // Edge case: kick ends at the last frame
+        if isKicking, let max = currentKickFrames.max(by: { $0.speed < $1.speed }) {
+            kicks.append(max)
+            print("🚀 Kick finalized at frame \(max.frame) — peak speed = \(Int(max.speed)) px/sec")
         }
 
         // Summary after all frames
