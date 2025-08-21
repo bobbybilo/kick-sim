@@ -3,6 +3,170 @@ import AVFoundation
 import Vision
 import AudioToolbox
 
+import UIKit
+
+class SpeedPlotView: UIView {
+    var speeds: [(time: TimeInterval, speed: CGFloat)] = []
+
+    override func draw(_ rect: CGRect) {
+        guard speeds.count > 1 else { return }
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+
+        // Clear the background
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(rect)
+
+        // --- Padding for axes/labels ---
+        let leftPadding: CGFloat = 60  // Increased for better label spacing
+        let bottomPadding: CGFloat = 50  // Increased for better label spacing
+        let plotRect = rect.inset(by: UIEdgeInsets(top: 20, left: leftPadding, bottom: bottomPadding, right: 20))
+
+        // --- Scale values ---
+        let maxSpeed = speeds.map { $0.speed }.max() ?? 1
+        let minSpeed: CGFloat = 0
+        let minTime = speeds.first!.time
+        let maxTime = speeds.last!.time
+        let timeRange = maxTime - minTime
+
+        // --- Draw axes ---
+        context.setStrokeColor(UIColor.black.cgColor)
+        context.setLineWidth(2)
+
+        // Y axis
+        context.move(to: CGPoint(x: plotRect.minX, y: plotRect.minY))
+        context.addLine(to: CGPoint(x: plotRect.minX, y: plotRect.maxY))
+
+        // X axis
+        context.move(to: CGPoint(x: plotRect.minX, y: plotRect.maxY))
+        context.addLine(to: CGPoint(x: plotRect.maxX, y: plotRect.maxY))
+
+        context.strokePath()
+
+        // --- Draw ticks + labels ---
+        let tickCount = 5
+
+        // Y-axis (speed) ticks and labels
+        context.setStrokeColor(UIColor.black.cgColor)
+        context.setLineWidth(1)
+        
+        for i in 0...tickCount {
+            let fraction = CGFloat(i) / CGFloat(tickCount)
+            let speedValue = minSpeed + fraction * (maxSpeed - minSpeed)
+            let y = plotRect.maxY - fraction * plotRect.height
+
+            // Draw tick mark
+            context.move(to: CGPoint(x: plotRect.minX - 5, y: y))
+            context.addLine(to: CGPoint(x: plotRect.minX, y: y))
+            context.strokePath()
+
+            // Draw label using Core Text
+            let label = String(format: "%.0f", speedValue)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 12),
+                .foregroundColor: UIColor.black
+            ]
+            
+            let attributedString = NSAttributedString(string: label, attributes: attributes)
+            let line = CTLineCreateWithAttributedString(attributedString)
+            let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+            
+            context.saveGState()
+            context.textMatrix = .identity
+            context.translateBy(x: plotRect.minX - bounds.width - 10, y: y - bounds.height / 2)
+            context.scaleBy(x: 1, y: -1)  // Flip text right-side up
+            CTLineDraw(line, context)
+            context.restoreGState()
+        }
+
+        // X-axis (time) ticks and labels
+        for i in 0...tickCount {
+            let fraction = CGFloat(i) / CGFloat(tickCount)
+            let timeValue = minTime + Double(fraction) * timeRange
+            let x = plotRect.minX + fraction * plotRect.width
+
+            // Draw tick mark
+            context.move(to: CGPoint(x: x, y: plotRect.maxY))
+            context.addLine(to: CGPoint(x: x, y: plotRect.maxY + 5))
+            context.strokePath()
+
+            // Draw label using Core Text
+            let label = String(format: "%.1fs", timeValue - minTime)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 12),
+                .foregroundColor: UIColor.black
+            ]
+            
+            let attributedString = NSAttributedString(string: label, attributes: attributes)
+            let line = CTLineCreateWithAttributedString(attributedString)
+            let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+            
+            context.saveGState()
+            context.textMatrix = .identity
+            context.translateBy(x: x - bounds.width / 2, y: plotRect.maxY + 15)
+            context.scaleBy(x: 1, y: -1)  // Flip text right-side up
+            CTLineDraw(line, context)
+            context.restoreGState()
+        }
+
+        // Add axis titles
+        // Y-axis title
+        let yAxisTitle = "Speed (px/sec)"
+        let yTitleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: 14),
+            .foregroundColor: UIColor.black
+        ]
+        let yAttributedTitle = NSAttributedString(string: yAxisTitle, attributes: yTitleAttributes)
+        let yTitleLine = CTLineCreateWithAttributedString(yAttributedTitle)
+        let yTitleBounds = CTLineGetBoundsWithOptions(yTitleLine, .useOpticalBounds)
+        
+        context.saveGState()
+        context.textMatrix = .identity
+        context.translateBy(x: 15, y: plotRect.midY + yTitleBounds.width / 2)
+        context.rotate(by: -CGFloat.pi / 2)  // Rotate 90 degrees
+        context.scaleBy(x: 1, y: -1)
+        CTLineDraw(yTitleLine, context)
+        context.restoreGState()
+
+        // X-axis title
+        let xAxisTitle = "Time (seconds)"
+        let xTitleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: 14),
+            .foregroundColor: UIColor.black
+        ]
+        let xAttributedTitle = NSAttributedString(string: xAxisTitle, attributes: xTitleAttributes)
+        let xTitleLine = CTLineCreateWithAttributedString(xAttributedTitle)
+        let xTitleBounds = CTLineGetBoundsWithOptions(xTitleLine, .useOpticalBounds)
+        
+        context.saveGState()
+        context.textMatrix = .identity
+        context.translateBy(x: plotRect.midX - xTitleBounds.width / 2, y: rect.maxY - 10)
+        context.scaleBy(x: 1, y: -1)
+        CTLineDraw(xTitleLine, context)
+        context.restoreGState()
+
+        // --- Draw line path ---
+        guard timeRange > 0 && maxSpeed > minSpeed else { return }
+        
+        let path = UIBezierPath()
+        for (i, entry) in speeds.enumerated() {
+            let x = plotRect.minX + CGFloat((entry.time - minTime) / timeRange) * plotRect.width
+            let y = plotRect.maxY - (entry.speed - minSpeed) / (maxSpeed - minSpeed) * plotRect.height
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+
+        context.setStrokeColor(UIColor.red.cgColor)
+        context.setLineWidth(3)
+        context.addPath(path.cgPath)
+        context.strokePath()
+    }
+}
+
+
+
 // Main view controller handling camera input, Vision processing, and UI
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
 
@@ -31,7 +195,29 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         setupOverlay()    // Prepare the shape drawing layer
         setupButtons()    // Add start and stop buttons to the UI
     }
+    
+    // Calculate speed per frame (distance / Δt)
+    private func calculateFrameSpeeds() -> [(time: TimeInterval, speed: CGFloat)] {
+        var results: [(time: TimeInterval, speed: CGFloat)] = []
+        guard anklePoints.count > 1 else { return results }
 
+        for i in 1..<anklePoints.count {
+            let current = anklePoints[i]
+            let previous = anklePoints[i-1]
+            let dt = current.time - previous.time
+            guard dt > 0.0001 else { continue }
+
+            let dx = current.point.x - previous.point.x
+            let dy = current.point.y - previous.point.y
+            let distance = sqrt(dx*dx + dy*dy)
+            let speed = distance / CGFloat(dt)
+
+            results.append((time: current.time, speed: speed))
+        }
+        return results
+    }
+
+    
     // MARK: - Kick Detection Logic
 
     private func computeLegSpeed() {
@@ -271,8 +457,22 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         isRecording = false
         print("Frames captured: \(anklePoints.count)")
         computeLegSpeed()
+
+        // Compute speed per frame and show plot
+        let frameSpeeds = calculateFrameSpeeds()
+        let plotVC = UIViewController()
+        plotVC.view.backgroundColor = .white
+
+        let plotView = SpeedPlotView(frame: plotVC.view.bounds)
+        plotView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        plotView.speeds = frameSpeeds
+        plotVC.view.addSubview(plotView)
+
+        present(plotVC, animated: true, completion: nil)
+
         print("⏹️ Recording stopped")
     }
+
 
     func toggleRecording() {
         isRecording ? stopRecording() : startRecording()
